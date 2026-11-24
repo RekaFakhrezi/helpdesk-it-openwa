@@ -2,7 +2,21 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Configure Supabase before starting the servers:
+
+- Root `.env.local`: set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the Supabase publishable key or legacy anon key), and `NEXT_PUBLIC_API_BASE_URL=http://localhost:5000/api`.
+- `backend/.env`: set `SUPABASE_URL`, `SUPABASE_ANON_KEY` (the same public key), and `SUPABASE_SERVICE_ROLE_KEY` (server-only).
+- Never put a service-role or secret key in a `NEXT_PUBLIC_*` variable. Rotate any privileged key previously exposed to the browser.
+- Restart the servers after changing environment files.
+
+From this project's root directory, start the backend in a separate terminal:
+
+```bash
+cd backend
+npm run dev
+```
+
+Then, from this project's root directory, run the frontend development server:
 
 ```bash
 npm run dev

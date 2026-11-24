@@ -6,7 +6,7 @@ export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
-    role: 'operator' | 'teknisi' | 'admin' | 'pimpinan';
+    role: 'operator' | 'teknisi' | 'admin' | 'pimpinan' | 'staff' | string;
     dept_id: number | null;
   };
 }
@@ -77,9 +77,16 @@ export const requireRole = (allowedRoles: string[]) => {
       return res.status(401).json({ error: 'User belum terautentikasi.' });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const currentRole = req.user.role;
+    const isAllowed =
+      allowedRoles.includes(currentRole) ||
+      (currentRole === 'staff' && allowedRoles.includes('operator')) ||
+      (currentRole === 'operator' && allowedRoles.includes('staff'));
+
+    if (!isAllowed) {
+      const displayRole = currentRole === 'operator' ? 'staff' : currentRole;
       return res.status(403).json({ 
-        error: `Akses ditolak. Peran '${req.user.role}' tidak memiliki izin untuk tindakan ini.` 
+        error: `Akses ditolak. Peran '${displayRole}' tidak memiliki izin untuk tindakan ini.` 
       });
     }
 
