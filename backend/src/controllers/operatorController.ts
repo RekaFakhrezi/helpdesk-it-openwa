@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
-import { sendMessage } from '../services/wasender';
+import { sendMessage } from '../services/openwa';
 
 export const getOperatorDashboard = async (req: Request, res: Response) => {
   try {

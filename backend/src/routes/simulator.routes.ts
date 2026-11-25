@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { simulatorLogs } from '../services/wasender';
+import { simulatorLogs } from '../services/openwa';
 import { handleIncomingMessage } from '../services/botService';
 
 const router = Router();
@@ -33,13 +33,12 @@ router.post('/send', async (req: Request, res: Response) => {
     });
     if (simulatorLogs.length > 100) simulatorLogs.shift();
 
-    // Trigger logika bot secara async (gabungkan mediaUrl ke text jika ada, agar botService sederhana)
+    // Lampiran simulator tetap ditampilkan sebagai tautan teks, bukan media WhatsApp.
     let combinedMessage = message || '';
     if (mediaUrl) {
       combinedMessage += `\n\n[Lampiran: ${mediaUrl}]`;
     }
-    // Panggil botService
-    handleIncomingMessage(phone, combinedMessage.trim(), mediaUrl);
+    await handleIncomingMessage(phone, combinedMessage.trim());
 
     res.json({ success: true });
   } catch (error) {

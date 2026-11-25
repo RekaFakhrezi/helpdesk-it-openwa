@@ -8,7 +8,8 @@ import ticketRoutes from './routes/ticket.routes';
 import metadataRoutes from './routes/metadata.routes';
 import operatorRoutes from './routes/operator.routes';
 import adminRoutes from './routes/admin.routes';
-import webhookRoutes from './routes/webhook.routes';
+import { createWebhookRouter } from './routes/webhook.routes';
+import { handleIncomingMessage } from './services/botService';
 import reporterRoutes from './routes/reporter.routes';
 import simulatorRoutes from './routes/simulator.routes';
 const app = express();
@@ -29,10 +30,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// Preserve signed wire bytes; the larger limit allows capped inline base64 attachments.
+app.use('/webhook', express.raw({ type: 'application/json', limit: '15mb', inflate: false }),
+  createWebhookRouter(async (sender, text, media) => { await handleIncomingMessage(sender, text, media); }));
 app.use(express.json());
 
 // Registrasi Routes
-app.use('/webhook', webhookRoutes);
+// Webhook is mounted before JSON parsing so signature verification sees the original bytes.
 app.use('/api/simulator', simulatorRoutes); // Rute untuk simulasi testing
 app.use('/api/auth', authRoutes);
 app.use('/api/tickets', ticketRoutes);
@@ -46,7 +50,7 @@ app.get('/', (req, res) => {
   res.send('API Helpdesk IT UNDIP Aktif!');
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 app.listen(PORT, () => {
   console.log(`Server Helpdesk berjalan di http://localhost:${PORT}`);
 

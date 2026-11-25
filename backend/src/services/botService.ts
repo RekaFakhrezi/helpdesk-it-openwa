@@ -1,8 +1,7 @@
 import { supabase } from '../config/supabase';
-import { sendMessage } from './wasender';
+import { sendMessage, downloadMedia, type IncomingMedia } from './openwa';
 import fs from 'fs';
 import path from 'path';
-import axios from 'axios';
 
 // =========================================================
 // IN-MEMORY CACHE untuk bot settings
@@ -78,7 +77,7 @@ interface WASession {
   updated_at?: string;
 }
 
-export async function handleIncomingMessage(sender: string, messageText: string, mediaUrl?: string, mediaKey?: string, mediaType?: string, msgData?: any) {
+export async function handleIncomingMessage(sender: string, messageText: string, media?: IncomingMedia) {
   const cleanInput = messageText.trim();
 
   // 0. Jalankan dua query awal secara PARALEL (bukan serial) untuk mengurangi latensi
@@ -208,7 +207,7 @@ export async function handleIncomingMessage(sender: string, messageText: string,
       break;
 
     case 'ASK_ATTACHMENT':
-      await handleAskAttachment(sender, cleanInput, currentData, mediaUrl, mediaKey, mediaType, msgData);
+      await handleAskAttachment(sender, cleanInput, currentData, media);
       break;
 
     case 'ASK_REUSE_INFO':
@@ -627,69 +626,12 @@ async function handleInputTicketDetail(sender: string, input: string, currentDat
   await sendMessage(sender, text);
 }
 
-async function handleAskAttachment(sender: string, input: string, currentData: any, mediaUrl?: string, mediaKey?: string, mediaType?: string, msgData?: any) {
+async function handleAskAttachment(sender: string, input: string, currentData: NonNullable<WASession['data']>, media?: IncomingMedia) {
   let updatedData = { ...currentData };
 
-  if (mediaUrl && mediaKey) {
+  if (media) {
     try {
-      // 1. Decrypt media via WASender API
-      // URL dari payload WhatsApp bersifat encrypted, tidak bisa di-download langsung.
-      // Kita harus minta WASender untuk decrypt dan memberikan publicUrl yang bisa di-download.
-      console.log(`Mendekripsi media via WASender (type: ${mediaType || 'image'})...`);
-      const decryptResponse = await axios.post(
-        `${process.env.WASENDER_BASE_URL || 'https://www.wasenderapi.com/api'}/decrypt-media`,
-        {
-          data: {
-            messages: msgData,
-          },
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.WASENDER_BEARER_TOKEN}`,
-          },
-          timeout: 30000,
-        }
-      );
-
-      const decryptedUrl: string = decryptResponse.data?.publicUrl || decryptResponse.data?.url;
-      if (!decryptedUrl) {
-        throw new Error(`WASender decrypt-media tidak mengembalikan URL. Response: ${JSON.stringify(decryptResponse.data)}`);
-      }
-      console.log(`✅ Media berhasil didekripsi, mengunduh dari: ${decryptedUrl}`);
-
-      // 2. Download file binary dari URL hasil decrypt
-      const downloadResponse = await axios.get(decryptedUrl, { responseType: 'arraybuffer', timeout: 30000 });
-      const buffer = downloadResponse.data;
-      let contentType = (downloadResponse.headers['content-type'] as string) || '';
-
-      // Tentukan content-type yang benar berdasarkan tipe media dari WhatsApp
-      // WhatsApp selalu mengirim file terenkripsi dengan content-type generic (octet-stream)
-      // sehingga kita harus menebak dari mediaType yang dikirim di webhook
-      if (!contentType || contentType === 'application/octet-stream') {
-        if (mediaType === 'document') {
-          // Cek MIME type dari msgData jika tersedia (WhatsApp menyertakan mimetype di documentMessage)
-          const mimeType: string = msgData?.message?.documentMessage?.mimetype || '';
-          if (mimeType.includes('pdf')) {
-            contentType = 'application/pdf';
-          } else if (mimeType.includes('word') || mimeType.includes('docx')) {
-            contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-          } else if (mimeType.includes('excel') || mimeType.includes('xlsx')) {
-            contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-          } else if (mimeType) {
-            contentType = mimeType;
-          } else {
-            contentType = 'application/pdf'; // default dokumen = pdf
-          }
-        } else if (mediaType === 'video') {
-          contentType = 'video/mp4';
-        } else {
-          contentType = 'image/jpeg'; // default media = gambar
-        }
-      } else if (!contentType.startsWith('image/') && !contentType.startsWith('application/') && !contentType.startsWith('video/')) {
-        // Content-type tidak dikenal, fallback ke image/jpeg
-        contentType = 'image/jpeg';
-      }
+      const { buffer, contentType } = await downloadMedia(media);
 
       // Tentukan ekstensi file dari content-type
       const mimeToExt: Record<string, string> = {
@@ -702,10 +644,10 @@ async function handleAskAttachment(sender: string, input: string, currentData: a
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
         'video/mp4': 'mp4',
       };
-      const ext = mimeToExt[contentType] || contentType.split('/')[1]?.split(';')[0] || 'bin';
+      const ext = mimeToExt[contentType] || 'bin';
       console.log(`Tipe file terdeteksi: ${contentType} (.${ext})`);
 
-      // 3. Upload ke Supabase Storage (bucket: ticket-attachments)
+      // Simpan lampiran dari gateway ke Supabase agar tidak bergantung pada retensi OpenWA.
       // Struktur folder: {nomor_wa}/{timestamp}.{ext}
       const fileName = `${sender}/${Date.now()}.${ext}`;
 
@@ -721,7 +663,7 @@ async function handleAskAttachment(sender: string, input: string, currentData: a
         throw uploadError;
       }
 
-      // 4. Dapatkan Public URL Supabase
+      // URL lampiran tetap menggunakan Supabase Storage.
       const { data: publicUrlData } = supabase.storage
         .from('ticket-attachments')
         .getPublicUrl(fileName);
@@ -736,8 +678,7 @@ async function handleAskAttachment(sender: string, input: string, currentData: a
   } else {
     const inputLower = input.toLowerCase().trim();
 
-    // Jika teks juga kosong (terjadi saat WASender kirim media tanpa caption)
-    // Tidak ada yang bisa diproses, tunggu input berikutnya
+    // Pesan tanpa teks maupun lampiran tidak mengubah langkah percakapan.
     if (!inputLower) {
       return;
     }
